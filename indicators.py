@@ -289,3 +289,76 @@ def chandelier_exit(high: pd.Series, low: pd.Series, close: pd.Series,
         "long_stop": long_stop,
         "short_stop": short_stop,
     }, index=close.index)
+
+
+# =============================================================================
+# SUPPORT / RESISTANCE
+# =============================================================================
+
+def find_sr_levels(high: pd.Series, low: pd.Series, close: pd.Series,
+                   lookback: int = 50, touch_count: int = 2,
+                   tolerance_pct: float = 0.002) -> list[float]:
+    """
+    Find support/resistance levels from recent price action.
+    Groups nearby highs/lows that cluster within tolerance.
+    Returns sorted list of S/R levels.
+    """
+    if len(high) < lookback:
+        return []
+
+    recent_high = high.iloc[-lookback:]
+    recent_low = low.iloc[-lookback:]
+
+    # Collect all swing points (local highs and lows)
+    points = []
+    for i in range(2, len(recent_high) - 2):
+        # Local high
+        if (recent_high.iloc[i] >= recent_high.iloc[i-1] and
+            recent_high.iloc[i] >= recent_high.iloc[i-2] and
+            recent_high.iloc[i] >= recent_high.iloc[i+1] and
+            recent_high.iloc[i] >= recent_high.iloc[i+2]):
+            points.append(float(recent_high.iloc[i]))
+        # Local low
+        if (recent_low.iloc[i] <= recent_low.iloc[i-1] and
+            recent_low.iloc[i] <= recent_low.iloc[i-2] and
+            recent_low.iloc[i] <= recent_low.iloc[i+1] and
+            recent_low.iloc[i] <= recent_low.iloc[i+2]):
+            points.append(float(recent_low.iloc[i]))
+
+    if not points:
+        return []
+
+    # Cluster nearby points
+    points.sort()
+    levels = []
+    cluster = [points[0]]
+
+    for p in points[1:]:
+        if abs(p - cluster[-1]) / cluster[-1] < tolerance_pct:
+            cluster.append(p)
+        else:
+            if len(cluster) >= touch_count:
+                levels.append(sum(cluster) / len(cluster))
+            cluster = [p]
+
+    if len(cluster) >= touch_count:
+        levels.append(sum(cluster) / len(cluster))
+
+    return sorted(levels)
+
+
+def find_next_sr(price: float, levels: list[float], side: str) -> float | None:
+    """
+    Find the next S/R level in the trade direction.
+    For longs: next resistance above price.
+    For shorts: next support below price.
+    """
+    if not levels:
+        return None
+
+    if side == "long":
+        above = [l for l in levels if l > price * 1.001]
+        return min(above) if above else None
+    else:
+        below = [l for l in levels if l < price * 0.999]
+        return max(below) if below else None

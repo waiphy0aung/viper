@@ -56,8 +56,9 @@ def run_cycle(data: MarketData, risk: PropFirmRisk, last_signal_time: dict):
         try:
             df_15m = data.fetch_15m(symbol)
             df_1h = data.fetch_1h(symbol)
+            df_daily = data.fetch_daily(symbol)
 
-            regime = detect_regime(df_15m, df_1h, symbol)
+            regime = detect_regime(df_15m, df_1h, symbol, df_daily)
             signal = generate_signal(df_15m, df_1h, regime, symbol)
 
             if signal is None or signal.signal == SignalType.HOLD:

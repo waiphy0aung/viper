@@ -52,18 +52,23 @@ def send_signal(signal: TradeSignal, lot_size: float, risk_dollars: float):
 
     now = datetime.now(timezone.utc).strftime("%H:%M UTC")
 
+    partial_line = ""
+    if signal.partial_tp is not None:
+        partial_line = f"\U0001f4a1 Partial: <code>Close 50% @ {signal.partial_tp:.2f}</code> then move SL to BE\n"
+
     text = (
         f"{emoji} <b>{direction} {signal.display_name}</b>\n"
         f"\n"
         f"\U0001f4cd Entry:  <code>{signal.entry_price:.2f}</code>\n"
         f"\U0001f6d1 SL:     <code>{signal.stop_loss:.2f}</code>\n"
         f"\U0001f3af TP:     <code>{signal.take_profit:.2f}</code>\n"
+        f"{partial_line}"
         f"\n"
         f"\U0001f4e6 Lot:    <code>{lot_size:.2f}</code>\n"
-        f"\U0001f4b0 Risk:   <code>${risk_dollars:.0f}</code> ({config.MAX_RISK_PER_TRADE*100:.0f}%)\n"
+        f"\U0001f4b0 Risk:   <code>${risk_dollars:.0f}</code> ({config.MAX_RISK_PER_TRADE*100:.1f}%)\n"
         f"\U0001f4ca R:R:    <code>1:{signal.risk_reward:.1f}</code>\n"
         f"\n"
-        f"\U0001f9e0 {signal.source.replace('_', ' ').title()} | {signal.regime}\n"
+        f"\U0001f9e0 {signal.source.replace('_', ' ').title()} | {signal.regime} | Daily {signal.daily_bias}\n"
         f"\U0001f4ac {signal.reason}\n"
         f"\n"
         f"\u23f0 {now}"

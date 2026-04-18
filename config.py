@@ -1,9 +1,9 @@
 """
-VIPER — Prop Firm Signal Engine
+VIPER — Prop Firm Signal Engine v2
 Configuration
 
-Sends Telegram signals for manual execution on Funding Pips.
-Designed for XAUUSD (Gold) on 15m timeframe.
+Multi-instrument signal bot for Funding Pips $5k challenge.
+XAUUSD + NAS100. Session-filtered, daily-bias, partial TP.
 """
 
 from __future__ import annotations
@@ -17,69 +17,76 @@ load_dotenv()
 # PROP FIRM RULES — Funding Pips $5k
 # =============================================================================
 ACCOUNT_SIZE = 5000
-DAILY_DD_LIMIT = 0.05           # 5% = $250
-MAX_DD_LIMIT = 0.10             # 10% = $500 (static from initial balance)
-PROFIT_TARGET_PHASE1 = 0.08     # 8% = $400
-PROFIT_TARGET_PHASE2 = 0.05     # 5% = $250
-EQUITY_FLOOR = ACCOUNT_SIZE * (1 - MAX_DD_LIMIT)  # $4,500
+DAILY_DD_LIMIT = 0.05
+MAX_DD_LIMIT = 0.10
+PROFIT_TARGET_PHASE1 = 0.08
+PROFIT_TARGET_PHASE2 = 0.05
+EQUITY_FLOOR = ACCOUNT_SIZE * (1 - MAX_DD_LIMIT)
 
 # =============================================================================
 # INSTRUMENTS
 # =============================================================================
-# Multi-instrument: trade what's trending, skip what's chopping
-# Gold via Bybit/OKX, NAS100 and EURUSD via yfinance
-SYMBOLS = ["XAUUSD"]
-SYMBOL_DISPLAY = {"XAUUSD": "XAUUSD", "NAS100": "NAS100", "EURUSD": "EURUSD"}
+SYMBOLS = ["XAUUSD", "NAS100"]
+SYMBOL_DISPLAY = {"XAUUSD": "XAUUSD", "NAS100": "NAS100"}
 
-# Data source mapping
 SYMBOL_DATA_SOURCE = {
     "XAUUSD": {"type": "ccxt", "exchange": "bybit", "ccxt_symbol": "XAU/USDT:USDT"},
     "NAS100": {"type": "yfinance", "ticker": "NQ=F"},
-    "EURUSD": {"type": "yfinance", "ticker": "EURUSD=X"},
 }
 
-# Spread per instrument (points)
 SPREAD = {
     "XAUUSD": 2.5,
-    "NAS100": 1.5,    # typical index spread on prop firms
-    "EURUSD": 0.00012, # ~1.2 pip spread on EURUSD
-}
-
-# Pip/point value per 0.01 lot for lot size calculation
-POINT_VALUE = {
-    "XAUUSD": 1.0,     # $1 per point per 0.01 lot
-    "NAS100": 0.10,    # $0.10 per point per 0.01 lot (micro)
-    "EURUSD": 1.0,     # $1 per pip per 0.1 lot (micro)
+    "NAS100": 1.5,
 }
 
 TIMEFRAME = "15m"
 HTF_TIMEFRAME = "1h"
+DAILY_TIMEFRAME = "1d"
 CANDLE_LIMIT = 200
 HTF_CANDLE_LIMIT = 100
 
 # =============================================================================
-# REGIME DETECTION — tuned for Gold
+# SESSION FILTER — only trade during liquid sessions
 # =============================================================================
-ADX_PERIOD = 14                 # gold trends smoother than crypto, standard ADX works
+# Gold: London 07-11 UTC, NY 13-17 UTC
+# NAS100: NY pre-market 12-13 UTC, NY session 13:30-20 UTC
+SESSION_FILTER_ENABLED = True
+SESSION_WINDOWS = {
+    "XAUUSD": [(7, 11), (13, 17)],       # London + NY overlap
+    "NAS100": [(13, 20)],                  # NY session
+}
+
+# =============================================================================
+# DAILY BIAS — higher timeframe directional filter
+# =============================================================================
+# Check daily EMA 50/200. Only long when daily bullish, short when bearish.
+# Per-asset: NAS100 respects daily trend. Gold trades intraday against daily.
+DAILY_BIAS_ENABLED = True
+DAILY_BIAS_SYMBOLS = ["NAS100"]  # only apply daily bias to these instruments
+DAILY_EMA_FAST = 50
+DAILY_EMA_SLOW = 200
+
+# =============================================================================
+# REGIME DETECTION
+# =============================================================================
+ADX_PERIOD = 14
 CHOP_PERIOD = 14
 ATR_FAST = 14
 ATR_SLOW = 100
 
-# Gold regime — tightened from backtests. ADX 20 was too loose, let in chop.
-# ADX 28 only fires on real trends. Choppiness thresholds widen the MR zone.
 REGIME_THRESHOLDS = {
     "XAUUSD": {"trending_adx": 25, "choppy_adx": 18, "trending_chop": 48, "choppy_chop": 58},
-    "NAS100": {"trending_adx": 25, "choppy_adx": 18, "trending_chop": 48, "choppy_chop": 55},
-    "EURUSD": {"trending_adx": 22, "choppy_adx": 16, "trending_chop": 50, "choppy_chop": 58},
+    "NAS100": {"trending_adx": 22, "choppy_adx": 16, "trending_chop": 50, "choppy_chop": 58},
 }
 REGIME_THRESHOLDS_DEFAULT = {"trending_adx": 25, "choppy_adx": 18, "trending_chop": 48, "choppy_chop": 58}
 
-# Daily ATR filter — skip trading when daily volatility is below average
-# This is the primary defense against Oct-Dec type chop periods
 DAILY_ATR_FILTER = True
 DAILY_ATR_PERIOD = 14
-DAILY_ATR_MIN_RATIO = 0.9      # current ATR must be >= 90% of its 20-bar average
-DAILY_ATR_MIN_ABSOLUTE = 8.0   # minimum ATR in points — below this, spread eats the edge
+DAILY_ATR_MIN_RATIO = 0.9
+DAILY_ATR_MIN_ABSOLUTE = {"XAUUSD": 8.0, "NAS100": 30.0}
+
+SUPERTREND_ATR_PERIOD = 10
+SUPERTREND_MULTIPLIER = 3.0
 
 # =============================================================================
 # TREND MODULE
@@ -93,9 +100,6 @@ BB_STD = 2.0
 
 HMA_FAST = 9
 HMA_SLOW = 21
-
-SUPERTREND_ATR_PERIOD = 10
-SUPERTREND_MULTIPLIER = 3.0
 
 TREND_VOLUME_MULTIPLIER = 1.3
 
@@ -115,45 +119,48 @@ MR_VOLUME_MULTIPLIER = 1.5
 MR_TIME_STOP_DEFAULT = 20
 
 # =============================================================================
-# STRATEGY MODE — Gold does both trend and MR well
+# STRATEGY MODE
 # =============================================================================
 ASSET_STRATEGY_MODE = {
     "XAUUSD": ["trend", "mean_reversion"],
-    "NAS100": ["trend"],              # NAS trends hard, MR is weak on indices
-    "EURUSD": ["trend", "mean_reversion"],
+    "NAS100": ["trend"],
 }
 
 # =============================================================================
-# RISK MANAGEMENT — Prop firm style
+# RISK MANAGEMENT
 # =============================================================================
-# Base risk 0.75% — keeps max DD under 10% over 180 days.
-# Dynamically throttled down further when approaching DD limits.
-MAX_RISK_PER_TRADE = 0.0075     # 0.75% = $37.50 risk per trade
-MAX_CONCURRENT_SIGNALS = 1      # one signal at a time — no stacking risk
+MAX_RISK_PER_TRADE = 0.0075
+MAX_CONCURRENT_SIGNALS = 1
 
-# Gold Chandelier Exit — tighter than crypto
 CHANDELIER_ATR_PERIOD = 14
 CHANDELIER_MULTIPLIER = {
     "XAUUSD": 2.5,
-    "NAS100": 3.0,              # indices are noisier
-    "EURUSD": 2.5,
+    "NAS100": 3.5,      # NAS is noisier, needs wider trailing stop
 }
 CHANDELIER_MULTIPLIER_DEFAULT = 2.5
 
-# Spread simulation (points) — applied on entry
-# Funding Pips raw spread XAUUSD: ~1.5-3.0 points during liquid hours
-# Using 2.5 as conservative average (covers spread + slippage)
-SPREAD_POINTS = 2.5
-
-# R:R target for TP calculation
-TARGET_RR = 2.0                 # 2.5 killed win rate. Keep 2.0, let ATR filter handle spread periods
-
-# Risk:Reward minimum — don't signal unless R:R >= this
+# =============================================================================
+# TAKE PROFIT — Dynamic + Partial
+# =============================================================================
+# Primary TP: next 1H S/R level (dynamic)
+# Fallback: fixed R:R if no clear S/R found
+TARGET_RR = 2.0
 MIN_RISK_REWARD = 1.5
 
-# Lot size reference for Funding Pips (gold)
-# 1 lot = 100 oz, pip value ~$1 per 0.1 lot on gold
-GOLD_POINT_VALUE = 1.0          # $1 per point per 0.01 lot
+# Partial TP: close 50% at 1:1, move SL to breakeven, trail rest
+PARTIAL_TP_ENABLED = True
+PARTIAL_TP_RATIO = 0.5         # close 50% of position
+PARTIAL_TP_RR = 1.0            # at 1:1 R:R
+MOVE_SL_TO_BE = True           # move SL to breakeven after partial TP
+
+# S/R detection for dynamic TP
+SR_LOOKBACK = 50               # 1H bars to scan for S/R levels
+SR_TOUCH_COUNT = 2             # minimum touches to qualify as S/R
+
+# =============================================================================
+# SPREAD
+# =============================================================================
+SPREAD_POINTS = {"XAUUSD": 2.5, "NAS100": 1.5}
 
 # =============================================================================
 # TELEGRAM
